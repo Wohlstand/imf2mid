@@ -1,4 +1,4 @@
 *.user
-/bin/imf2midi
+/bin/imf2mid
 /bin/*.imf
 /bin/*.mid
