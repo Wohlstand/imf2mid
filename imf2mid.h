@@ -41,15 +41,29 @@ struct AdLibInstrument
 
 struct Imf2MIDI_CVT
 {
-    AdLibInstrument imf_instruments[9];
-    //private
+    struct AdLibInstrument imf_instruments[9];
+    //MIDI props
     double   midi_tempo;
     uint32_t midi_resolution;
     uint8_t  midi_mapchannel[9];
+    uint32_t midi_lastpatch[9];
     uint32_t midi_lastpitch;
+    uint32_t midi_trackBegin;
+    uint32_t midi_pos;
+    uint32_t midi_fileSize;
+    uint32_t midi_tracksNum;
+    int      midi_eventCode;
+    int      midi_isEndOfTrack;
+    uint32_t midi_delta;
+    uint32_t midi_time;
+
+    //File paths
+    char*    path_in;
+    char*    path_out;
 };
 
 extern void Imf2MIDI_init(struct Imf2MIDI_CVT *cvt);
+extern int  Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log);
 
 
 #endif // CONVERTER_H

@@ -24,8 +24,6 @@
  */
 
 #include <stdio.h>
-#include <stdint.h>
-
 #include "imf2mid.h"
 
 int isFileExists(char* filePath)
@@ -47,6 +45,8 @@ int printUsage()
 
 int main(int argc, char **argv)
 {
+    struct Imf2MIDI_CVT cvt;
+
     if(argc <= 1)
         return printUsage();
 
@@ -55,6 +55,16 @@ int main(int argc, char **argv)
         fprintf(stderr, "\x1b[31mERROR:\x1b[0m Source file is invalid!");
         return printUsage();
     }
+
+    Imf2MIDI_init(&cvt);
+
+    cvt.path_in = argv[1];
+
+    if(argc >= 2)
+        cvt.path_out = argv[2];
+
+    Imf2MIDI_process(&cvt, 1);
+
 
     return 0;
 }
