@@ -69,8 +69,8 @@ static uint16_t readLE16(FILE* f)
     if(fread(bytes, 1, 2, f) != 2)
         return 0;
 
-    out  = bytes[0] & 0x00FF;
-    out += bytes[1] & 0xFF00;
+    out  = (uint16_t)bytes[0] & 0x00FF;
+    out |= ((uint16_t)bytes[1]<<8) & 0xFF00;
     return out;
 }
 
@@ -82,10 +82,10 @@ static uint32_t readLE32(FILE* f)
     if(fread(bytes, 1, 4, f) != 4)
         return 0;
 
-    out  = bytes[0] & 0x000000FF;
-    out += bytes[1] & 0x0000FF00;
-    out += bytes[2] & 0x00FF0000;
-    out += bytes[3] & 0xFF000000;
+    out  = (uint32_t)bytes[0] & 0x000000FF;
+    out |= ((uint32_t)bytes[1]<<8) & 0x0000FF00;
+    out |= ((uint32_t)bytes[2]<<16) & 0x00FF0000;
+    out |= ((uint32_t)bytes[3]<<24) & 0xFF000000;
     return out;
 }
 
@@ -94,14 +94,15 @@ static int write8(FILE* f, uint8_t in)
     return (int)fwrite(&in, 1, 1, f);
 }
 
-static int writeLE16(FILE* f, uint32_t in)
+static int writeBE16(FILE* f, uint32_t in)
 {
     uint8_t bytes[2];
-    bytes[0] = in & 0xFF;
-    bytes[1] = (in>>8) & 0xFF;
+    bytes[1] = in & 0xFF;
+    bytes[0] = (in>>8) & 0xFF;
     return (int)fwrite(bytes, 1, 2, f);
 }
 
+/*
 static int writeLE24(FILE* f, uint32_t in)
 {
     uint8_t bytes[3];
@@ -109,8 +110,18 @@ static int writeLE24(FILE* f, uint32_t in)
     bytes[1] = (in>>8) & 0xFF;
     bytes[2] = (in>>16) & 0xFF;
     return (int)fwrite(bytes, 1, 3, f);
+}*/
+
+static int writeBE24(FILE* f, uint32_t in)
+{
+    uint8_t bytes[3];
+    bytes[2] = in & 0xFF;
+    bytes[1] = (in>>8) & 0xFF;
+    bytes[0] = (in>>16) & 0xFF;
+    return (int)fwrite(bytes, 1, 3, f);
 }
 
+/*
 static int writeLE32(FILE* f, uint32_t in)
 {
     uint8_t bytes[4];
@@ -119,31 +130,41 @@ static int writeLE32(FILE* f, uint32_t in)
     bytes[2] = (in>>16) & 0xFF;
     bytes[3] = (in>>24) & 0xFF;
     return (int)fwrite(bytes, 1, 4, f);
+}*/
+
+static int writeBE32(FILE* f, uint32_t in)
+{
+    uint8_t bytes[4];
+    bytes[3] = in & 0xFF;
+    bytes[2] = (in>>8) & 0xFF;
+    bytes[1] = (in>>16) & 0xFF;
+    bytes[0] = (in>>24) & 0xFF;
+    return (int)fwrite(bytes, 1, 4, f);
 }
 
 static int writeVarLen32(FILE* f, uint32_t in)
 {
-    uint32_t buffer;
-    uint32_t value = in;
     uint8_t  bytes[4];
+    size_t   len = 0;
     uint8_t *ptr = bytes;
-    uint8_t  len = 0;
+    int32_t  i;
 
-    buffer = value & 0x7f;
-    while ((value >>= 7) > 0)
+    int isFirst = 1;
+    for(i = 3; i >= 0; i--)
     {
-        buffer <<= 8;
-        buffer |= 0x80;
-        buffer += (value & 0x7f);
-    }
-    while(1)
-    {
-        *ptr++ = (uint8_t)buffer;
-        len++;
-        if (buffer & 0x80)
-            buffer >>= 8;
-        else
-            break;
+        uint32_t b = in>>(7*i);
+        uint8_t byte = (uint8_t)b & 127;
+        if(!isFirst || (byte > 0) || (i == 0))
+        {
+            isFirst = 0;
+            if(i > 0)
+            {
+                // set 8th bit
+                byte |= 128;
+            }
+            *ptr++ = byte;
+            len++;
+        }
     }
     return (int)fwrite(bytes, 1, len, f);
 }
@@ -156,13 +177,20 @@ static void MIDI_addDelta(struct Imf2MIDI_CVT *cvt, uint32_t delta)
 static void MIDI_writeHead(FILE* f, struct Imf2MIDI_CVT *cvt)
 {
     fseek(f, 0, SEEK_SET);
-    fwrite(MThd, 1, 4, f);
-    writeLE32(f, 6);//Size of the head
-    writeLE32(f, 0);//MIDI format 0
-    writeLE32(f, 0);//Zero tracks count
-    writeLE32(f, cvt->midi_resolution);
-    cvt->midi_fileSize = 20;
+    fwrite(MThd, 1, 4, f);              //0
+    writeBE32(f, 6);//Size of the head  //4
+    writeBE16(f, 0);//MIDI format 0     //8
+    writeBE16(f, 0);//Zero tracks count //10
+    writeBE16(f, cvt->midi_resolution); //12
+    cvt->midi_fileSize = (uint32_t)ftell(f);
 }
+
+static void MIDI_closeHead(FILE* f, struct Imf2MIDI_CVT *cvt)
+{
+    fseek(f, 10, SEEK_SET);
+    writeBE16(f, cvt->midi_tracksNum);
+}
+
 
 static void MIDI_writeEventCode(FILE*f,
                                 struct Imf2MIDI_CVT *cvt,
@@ -186,7 +214,7 @@ static void MIDI_writeMetaEvent(FILE*f,
     write8(f, type);
     writeVarLen32(f, size);
     fwrite(bytes, 1, (size_t)size, f);
-    cvt->midi_fileSize = ftell(f);
+    cvt->midi_fileSize = (uint32_t)ftell(f);
 }
 
 static void MIDI_writeControlEvent(FILE*f,
@@ -202,7 +230,7 @@ static void MIDI_writeControlEvent(FILE*f,
     MIDI_writeEventCode(f, cvt, 0xB0 + channel);
     write8(f, controller);
     write8(f, value);
-    cvt->midi_fileSize = ftell(f);
+    cvt->midi_fileSize = (uint32_t)ftell(f);
 }
 
 static void MIDI_writePatchChangeEvent(FILE* f,
@@ -216,7 +244,7 @@ static void MIDI_writePatchChangeEvent(FILE* f,
     channel = channel % 16;
     MIDI_writeEventCode(f, cvt, 0xC0 + channel);
     write8(f, patch);
-    cvt->midi_fileSize = ftell(f);
+    cvt->midi_fileSize = (uint32_t)ftell(f);
 }
 
 static void MIDI_writePitchEvent(FILE*f,
@@ -231,7 +259,7 @@ static void MIDI_writePitchEvent(FILE*f,
     MIDI_writeEventCode(f, cvt, 0xE0 + channel);
     write8(f,  value & 0x7F);
     write8(f, (value>>7) & 0x7F);
-    cvt->midi_fileSize = ftell(f);
+    cvt->midi_fileSize = (uint32_t)ftell(f);
 }
 
 static void MIDI_writeNoteOnEvent(FILE*f,
@@ -247,7 +275,7 @@ static void MIDI_writeNoteOnEvent(FILE*f,
     MIDI_writeEventCode(f, cvt, 0x90 + channel);
     write8(f,  key);
     write8(f,  velocity);
-    cvt->midi_fileSize = ftell(f);
+    cvt->midi_fileSize = (uint32_t)ftell(f);
 }
 
 static void MIDI_writeNoteOffEvent(FILE*f,
@@ -266,7 +294,7 @@ static void MIDI_writeNoteOffEvent(FILE*f,
     MIDI_writeEventCode(f, cvt, code + channel);
     write8(f,  key);
     write8(f,  velocity);
-    cvt->midi_fileSize = ftell(f);
+    cvt->midi_fileSize = (uint32_t)ftell(f);
 }
 
 static void MIDI_writeTempoEvent(FILE*f,
@@ -279,8 +307,8 @@ static void MIDI_writeTempoEvent(FILE*f,
     MIDI_writeEventCode(f, cvt, 0xFF);
     write8(f, 0x51);
     write8(f, 0x03);
-    writeLE24(f, ticks);
-    cvt->midi_fileSize = ftell(f);
+    writeBE24(f, ticks);
+    cvt->midi_fileSize = (uint32_t)ftell(f);
 }
 
 static void MIDI_writeMetricKeyEvent(FILE*f,
@@ -301,7 +329,7 @@ static void MIDI_writeMetricKeyEvent(FILE*f,
     write8(f, denomID);
     write8(f, key1);
     write8(f, key2);
-    cvt->midi_fileSize = ftell(f);
+    cvt->midi_fileSize = (uint32_t)ftell(f);
 }
 
 
@@ -315,10 +343,10 @@ static void MIDI_beginTrack(FILE* f, struct Imf2MIDI_CVT *cvt)
     cvt->midi_eventCode = -1;
     cvt->midi_isEndOfTrack = 0;
     fwrite(MTrk, 1, 4, f);
-    cvt->midi_trackBegin = cvt->midi_fileSize + 4;
-    writeLE32(f, 0);//Track length
+    cvt->midi_trackBegin = (uint32_t)ftell(f);
+    writeBE32(f, 0);//Track length
     cvt->midi_tracksNum++;
-    cvt->midi_fileSize = ftell(f);
+    cvt->midi_fileSize = (uint32_t)ftell(f);
 }
 
 static void MIDI_endTrack(FILE* f, struct Imf2MIDI_CVT *cvt)
@@ -328,8 +356,8 @@ static void MIDI_endTrack(FILE* f, struct Imf2MIDI_CVT *cvt)
 
     MIDI_writeMetaEvent(f, cvt, 0x2f, 0, 0);
     cvt->midi_isEndOfTrack = 1;
-    fseek(f, cvt->midi_trackBegin + 4, SEEK_SET);
-    writeLE32( f, cvt->midi_fileSize - cvt->midi_trackBegin - 8);
+    fseek(f, cvt->midi_trackBegin, SEEK_SET);
+    writeBE32( f, cvt->midi_fileSize - cvt->midi_trackBegin - 12);
     fseek(f, cvt->midi_fileSize, SEEK_SET);
     cvt->midi_trackBegin = 0;
 }
@@ -359,7 +387,49 @@ const uint32_t note_frequencies[] =
     0
 };
 
-uint8_t hzToKey(uint32_t hz, uint32_t octave)
+int8_t nearestFreq(uint32_t hz)
+{
+    int         found           = 0;
+    int8_t      nearestIndex    = -1;
+    uint32_t    nearestDistance = 0;
+
+    for(int8_t i = 0; note_frequencies[i]; i++)
+    {
+        uint32_t dist = (uint32_t)fabs((double)(hz - note_frequencies[i]));
+
+        if((found == 0) || (dist < nearestDistance))
+        {
+            found = 1;
+            nearestIndex    = i;
+            nearestDistance = dist;
+        }
+    }
+    return nearestIndex;
+}
+
+int32_t relativeFreq(uint32_t hz, uint32_t halfnotes)
+{
+    int8_t  nearestIndex = nearestFreq(hz);
+
+    if(nearestIndex < 0)
+        return -1;
+
+    int32_t direction = (halfnotes > 0) ? 1 : -1;
+    int32_t i = nearestIndex;
+
+    while((i >= 0) && (note_frequencies[i]) && (halfnotes != 0))
+    {
+        halfnotes -= (uint32_t)direction;
+        i += direction;
+    }
+
+    if(halfnotes == 0)
+        return (int32_t)note_frequencies[i];
+
+    return -1;
+}
+
+uint8_t hzToKey(uint32_t hz, uint8_t octave)
 {
     //TODO: Use frequency multiplexing register value to detect octave accurate
     octave += 2; //Fix missed octaves!
@@ -369,24 +439,38 @@ uint8_t hzToKey(uint32_t hz, uint32_t octave)
     if(hz == 0)
         return 0;
 
-    int found = 0;
-    int32_t  nearestIndex    = -1;
-    uint32_t nearestDistance = 0;
-
-    for(uint32_t i = 0; note_frequencies[i]; i++)
-    {
-        uint32_t dist = (uint32_t)fabs((double)(hz - note_frequencies[i]));
-
-        if((found == 0) || (dist < nearestDistance))
-        {
-            found           = 1;
-            nearestIndex    = i;
-            nearestDistance = dist;
-        }
-    }
-
-    return found ? (octave + nearestIndex) : 0;
+    int8_t nearestIndex = nearestFreq(hz);
+    return nearestIndex >= 0 ? (uint8_t)(octave + nearestIndex) : 0;
 }
+
+static uint8_t opl2_opChannel[] = {
+  //0  1  2  3  4  5
+    0, 1, 2, 0, 1, 2,
+  //6, 7,
+    0, 0,
+  //8, 9, A, B, C, D
+    3, 4, 5, 3, 4, 5,
+  //E, F,
+    0, 0,
+  //10,11,12,13,14,15
+    6, 7, 8, 6, 7, 8,
+    0
+};
+
+static uint8_t opl2_op[] =
+{
+    //0  1  2  3  4  5
+      0, 0, 0, 1, 1, 1,
+    //6, 7,
+      0, 0,
+    //8, 9, A, B, C, D
+      0, 0, 0, 1, 1, 1,
+    //E, F,
+      0, 0,
+    //10,11,12,13,14,15
+      0, 0, 0, 1, 1, 1,
+      0
+};
 
 int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
 {
@@ -398,11 +482,14 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
     uint32_t imf_length = 0;
     uint32_t imf_delay  = 0;
     uint32_t imf_freq[9];
-    uint32_t imf_octave  = 0;
+    //! Array of pressed keys which allows to mute a pitched or toggled notes without powering off
+    uint8_t  imf_keys[9];
+    uint8_t  imf_octave  = 0;
     uint8_t  imf_channel = 0;
     uint8_t  imf_regKey = 0;
     uint8_t  imf_regVal = 0;
 
+    memset(imf_keys, 0, sizeof(imf_keys));
 
     if(!cvt)
         return 0;
@@ -483,12 +570,12 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
         cvt->midi_lastpatch[c] = c;
     }
 
-    while((imf_length > 0) && (ftell(file_in) != EOF))
+    while(imf_length > 0)
     {
         imf_length -= 4;
         imf_delay = readLE16(file_in);
-        imf_regKey = fgetc(file_in);
-        imf_regVal = fgetc(file_in);
+        imf_regKey = (uint8_t)fgetc(file_in);
+        imf_regVal = (uint8_t)fgetc(file_in);
         MIDI_addDelta(cvt, imf_delay);
 
         if((imf_regKey >= 0xA0) && (imf_regKey <= 0xA8))
@@ -501,7 +588,7 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
         if((imf_regKey >= 0xB0) && (imf_regKey <= 0xB8))
         {
             imf_channel = imf_regKey - 0xB0;
-            imf_freq[imf_channel] = (imf_freq[imf_channel] & 0x00FF)|((imf_regVal & 0x03) << 0x08);
+            imf_freq[imf_channel] = (imf_freq[imf_channel] & 0x00FF)| (uint32_t)((imf_regVal & 0x03) << 0x08);
             imf_octave = (imf_regVal >> 0x02) & 0x07;
             int keyon = (imf_regVal >> 5) & 1;
             uint8_t key = hzToKey(imf_freq[imf_channel], imf_octave);
@@ -510,19 +597,72 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
             {
                 if(keyon)
                 {
-                    MIDI_writeNoteOnEvent(file_out, cvt, cvt->midi_mapchannel[imf_channel], key, 127);
+                    uint8_t level = cvt->imf_instruments[imf_channel].reg40[0] & 0x3F;
+
+                    if(level > (cvt->imf_instruments[imf_channel].reg40[1] & 0x3F))
+                        level = cvt->imf_instruments[imf_channel].reg40[1] & 0x3F;
+
+                    if(imf_keys[imf_channel] != 0)// Mute note in channel if already pressed!
+                        MIDI_writeNoteOffEvent(file_out, cvt, cvt->midi_mapchannel[imf_channel], imf_keys[imf_channel], 0);
+
+                    imf_keys[imf_channel] = key;
+                    MIDI_writeNoteOnEvent(file_out, cvt, cvt->midi_mapchannel[imf_channel], key, ((0x3f - level) << 1) & 0xFF);
                 }
                 else
                 {
-                    MIDI_writeNoteOffEvent(file_out, cvt, cvt->midi_mapchannel[imf_channel], key, 0);
+                    MIDI_writeNoteOffEvent(file_out, cvt, cvt->midi_mapchannel[imf_channel], imf_keys[imf_channel], 0);
+                    imf_keys[imf_channel] = 0;
                 }
             }
 
             continue;
         }
+
+        if((imf_regKey >= 0x20) && (imf_regKey <= 0x35))
+        {
+            imf_channel = opl2_opChannel[(imf_regKey - 0x20) % 0x15];
+            cvt->imf_instruments[imf_channel].reg20[opl2_op[(imf_regKey - 0x20) % 0x15]] = imf_regVal;
+            continue;
+        }
+
+        if((imf_regKey >= 0x40) && (imf_regKey <= 0x55))
+        {
+            imf_channel = opl2_opChannel[(imf_regKey - 0x40) % 0x15];
+            cvt->imf_instruments[imf_channel].reg40[opl2_op[(imf_regKey - 0x40) % 0x15]] = imf_regVal;
+            continue;
+        }
+
+        if((imf_regKey >= 0x60) && (imf_regKey <= 0x75))
+        {
+            imf_channel = opl2_opChannel[(imf_regKey - 0x60) % 0x15];
+            cvt->imf_instruments[imf_channel].reg60[opl2_op[(imf_regKey - 0x60) % 0x15]] = imf_regVal;
+            continue;
+        }
+
+        if((imf_regKey >= 0x80) && (imf_regKey <= 0x95))
+        {
+            imf_channel = opl2_opChannel[(imf_regKey - 0x80) % 0x15];
+            cvt->imf_instruments[imf_channel].reg80[opl2_op[(imf_regKey - 0x80) % 0x15]] = imf_regVal;
+            continue;
+        }
+
+        if((imf_regKey >= 0xC0) && (imf_regKey <= 0xC8))
+        {
+            imf_channel = imf_regKey - 0xC0;
+            cvt->imf_instruments[imf_channel].regC0 = imf_regVal;
+            continue;
+        }
+
+        if((imf_regKey >= 0xe0) && (imf_regKey <= 0xF5))
+        {
+            imf_channel = opl2_opChannel[(imf_regKey - 0xE0) % 0x15];
+            cvt->imf_instruments[imf_channel].regE0[opl2_op[(imf_regKey - 0xE0) % 0x15]] = imf_regVal;
+            continue;
+        }
     }
 
     MIDI_endTrack(file_out, cvt);
+    MIDI_closeHead(file_out, cvt);
 
     if(log)
     {
