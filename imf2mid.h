@@ -47,7 +47,7 @@ struct Imf2MIDI_CVT
     uint32_t midi_resolution;
     uint8_t  midi_mapchannel[9];
     uint32_t midi_lastpatch[9];
-    uint32_t midi_lastpitch;
+    uint16_t midi_lastpitch[9];
     uint32_t midi_trackBegin;
     uint32_t midi_pos;
     uint32_t midi_fileSize;
