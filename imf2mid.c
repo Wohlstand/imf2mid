@@ -23,38 +23,16 @@
  *
  */
 
-#include <stdio.h>
-#include <stdint.h>
+#include "imf2mid.h"
+#include <memory.h>
 
-#include "converter.h"
+#define  MIDI_PITCH_CENTER 0x2000
 
-int isFileExists(char* filePath)
+void Imf2MIDI_init(Imf2MIDI_CVT *cvt)
 {
-    FILE* f = fopen(filePath, "rb");
-    if(!f)
-        return 0;
-    fclose(f);
-    return 1;
-}
-
-int printUsage()
-{
-    printf("\x1b[32mIMF2MID\x1b[0m utility converts imf (Id-Software Music File) format into General Midi by Wohlstand\n\n");
-    printf("  \x1b[31mUsage:\x1b[0m\n");
-    printf("     ./imf2mid \x1b[32mfilename.imf\x1b[0m \x1b[37m[filename.mid]\x1b[0m\n\n");
-    return 1;
-}
-
-int main(int argc, char **argv)
-{
-    if(argc <= 1)
-        return printUsage();
-
-    if(!isFileExists(argv[1]))
-    {
-        fprintf(stderr, "\x1b[31mERROR:\x1b[0m Source file is invalid!");
-        return printUsage();
-    }
-
-    return 0;
+    memset(cvt->imf_instruments, 0, sizeof(cvt->imf_instruments));
+    memset(cvt->midi_mapchannel, 0, sizeof(cvt->midi_mapchannel));
+    cvt->midi_resolution = 384;
+    cvt->midi_tempo = 110.0;
+    cvt->midi_lastpitch = MIDI_PITCH_CENTER;
 }

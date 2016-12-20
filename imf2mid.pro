@@ -6,10 +6,10 @@ TARGET = imf2mid
 DESTDIR = $$PWD/bin
 
 SOURCES += \
-    imf2mid.c \
-    converter.c
+    main.c \
+    imf2mid.c
 
 HEADERS += \
-    converter.h
+    imf2mid.h
 
 
