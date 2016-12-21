@@ -3,13 +3,13 @@ CONFIG += console
 CONFIG -= qt
 
 TARGET = imf2mid
-DESTDIR = $$PWD/bin
+DESTDIR = $$PWD/../bin
 
 SOURCES += \
-    main.c \
-    imf2mid.c
+    ../main.c \
+    ../imf2mid.c
 
 HEADERS += \
-    imf2mid.h
+    ../imf2mid.h
 
 
