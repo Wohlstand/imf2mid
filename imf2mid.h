@@ -28,15 +28,15 @@
 
 #define IMF2MID_VERSION     "0.9b"
 
-#ifndef __MSDOS__
-#include <stdint.h>
-#else
+#if defined(MSDOS) || defined(__MSDOS__) || defined(_MSDOS) || defined(__DOS__)
 typedef unsigned char  uint8_t;
 typedef unsigned short uint16_t;
 typedef unsigned long  uint32_t;
 typedef signed char    int8_t;
 typedef signed short   int16_t;
 typedef signed long    int32_t;
+#else
+#include <stdint.h>
 #endif
 
 struct AdLibInstrument
