@@ -26,7 +26,16 @@
 #ifndef CONVERTER_H
 #define CONVERTER_H
 
+#ifndef __MSDOS__
 #include <stdint.h>
+#else
+typedef unsigned char  uint8_t;
+typedef unsigned short uint16_t;
+typedef unsigned long  uint32_t;
+typedef signed char    int8_t;
+typedef signed short   int16_t;
+typedef signed long    int32_t;
+#endif
 
 struct AdLibInstrument
 {
@@ -42,6 +51,7 @@ struct AdLibInstrument
 struct Imf2MIDI_CVT
 {
     struct AdLibInstrument imf_instruments[9];
+    struct AdLibInstrument imf_instrumentsPrev[9];
     //MIDI props
     double   midi_tempo;
     uint32_t midi_resolution;
@@ -58,12 +68,12 @@ struct Imf2MIDI_CVT
     uint32_t midi_time;
 
     //File paths
-    char*    path_in;
-    char*    path_out;
+    char    *path_in;
+    char    *path_out;
 };
 
 extern void Imf2MIDI_init(struct Imf2MIDI_CVT *cvt);
-extern int  Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log);
+extern int  Imf2MIDI_process(struct Imf2MIDI_CVT *cvt, int log);
 
 
 #endif // CONVERTER_H

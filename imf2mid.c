@@ -25,47 +25,16 @@
 
 #include "imf2mid.h"
 #include <memory.h>
-#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <malloc.h>
 #include <math.h>
 
-#define  MIDI_PITCH_CENTER 0x2000
-#define  MThd "MThd"
-#define  MTrk "MTrk"
-
+#define  MIDI_PITCH_CENTER      0x2000
 #define  MIDI_CONTROLLER_VOLUME 7
 
-void Imf2MIDI_init(struct Imf2MIDI_CVT *cvt)
-{
-    size_t i = 0;
-
-    if(!cvt)
-        return;
-
-    memset(cvt->imf_instruments, 0, sizeof(cvt->imf_instruments));
-    memset(cvt->midi_mapchannel, 0, sizeof(cvt->midi_mapchannel));
-    memset(cvt->midi_lastpatch,  0, sizeof(cvt->midi_lastpatch));
-    memset(cvt->midi_lastpitch, 0, sizeof(cvt->midi_lastpitch));
-
-    cvt->midi_resolution    = 384;
-    cvt->midi_tempo         = 110.0;
-
-    for(i = 0; i < 9; i++)
-        cvt->midi_lastpitch[i] = MIDI_PITCH_CENTER;
-
-    cvt->midi_trackBegin    = 0;
-    cvt->midi_pos           = 0;
-    cvt->midi_fileSize      = 0;
-    cvt->midi_tracksNum     = 0;
-    cvt->midi_eventCode     = -1;
-    cvt->midi_isEndOfTrack  = 1;
-    cvt->midi_delta         = 0;
-    cvt->midi_time          = 0;
-
-    cvt->path_in    = NULL;
-    cvt->path_out   = NULL;
-}
+//#define BETA
 
 static uint16_t readLE16(FILE* f)
 {
@@ -183,7 +152,7 @@ static void MIDI_addDelta(struct Imf2MIDI_CVT *cvt, uint32_t delta)
 static void MIDI_writeHead(FILE* f, struct Imf2MIDI_CVT *cvt)
 {
     fseek(f, 0, SEEK_SET);
-    fwrite(MThd, 1, 4, f);                  /* 0  */
+    fwrite("MThd", 1, 4, f);                /* 0  */
     writeBE32(f, 6);/* Size of the head */  /* 4  */
     writeBE16(f, 0);/* MIDI format 0    */  /* 8  */
     writeBE16(f, 0);/* Zero tracks count*/  /* 10 */
@@ -253,6 +222,7 @@ static void MIDI_writePatchChangeEvent(FILE* f,
     cvt->midi_fileSize = (uint32_t)ftell(f);
 }
 
+#ifdef BETA
 static void MIDI_writePitchEvent(FILE*f,
                                  struct Imf2MIDI_CVT *cvt,
                                  uint8_t    channel,
@@ -274,6 +244,7 @@ static void MIDI_writePitchEvent(FILE*f,
     /* Remember pitch value to don't repeat */
     cvt->midi_lastpitch[channel] = value;
 }
+#endif
 
 static void MIDI_writeNoteOnEvent(FILE*f,
                                  struct Imf2MIDI_CVT *cvt,
@@ -297,13 +268,14 @@ static void MIDI_writeNoteOffEvent(FILE*f,
                                    uint8_t   key,
                                    uint8_t   velocity)
 {
+    uint8_t code = ((velocity != 0) ||
+                   (cvt->midi_eventCode < 0) ||
+                  ((cvt->midi_eventCode & 0xF0) != 0x90)) ? 0x80 : 0x90;
+    channel = channel % 16;
+
     writeVarLen32(f, cvt->midi_delta);
     cvt->midi_delta = 0;
 
-    channel = channel % 16;
-    uint8_t code = ((velocity != 0) ||
-                   (cvt->midi_eventCode < 0) ||
-                    ((cvt->midi_eventCode & 0xF0) != 0x90)) ? 0x80 : 0x90;
     MIDI_writeEventCode(f, cvt, code + channel);
     write8(f,  key);
     write8(f,  velocity);
@@ -331,10 +303,11 @@ static void MIDI_writeMetricKeyEvent(FILE*f,
                                      uint8_t key1,
                                      uint8_t key2)
 {
+    uint8_t denomID = (uint8_t)(log((double)denom) / log(2.0));
+
     writeVarLen32(f, cvt->midi_delta);
     cvt->midi_delta = 0;
 
-    uint8_t denomID = (uint8_t)(log((double)denom) / log(2.0));
     MIDI_writeEventCode(f, cvt, 0xFF);
     write8(f, 0x58);
     write8(f, 0x04);
@@ -355,7 +328,7 @@ static void MIDI_beginTrack(FILE* f, struct Imf2MIDI_CVT *cvt)
     cvt->midi_delta = 0;
     cvt->midi_eventCode = -1;
     cvt->midi_isEndOfTrack = 0;
-    fwrite(MTrk, 1, 4, f);
+    fwrite("MTrk", 1, 4, f);
     cvt->midi_trackBegin = (uint32_t)ftell(f);
     writeBE32(f, 0); /* Track length */
     cvt->midi_tracksNum++;
@@ -375,7 +348,7 @@ static void MIDI_endTrack(FILE* f, struct Imf2MIDI_CVT *cvt)
     cvt->midi_trackBegin = 0;
 }
 
-const uint32_t note_frequencies[] =
+static const uint32_t note_frequencies[] =
 {
     345, /* C      24 */
     363, /* C#     25 */
@@ -400,13 +373,14 @@ const uint32_t note_frequencies[] =
     0
 };
 
-int8_t nearestFreq(uint32_t hz)
+static int8_t nearestFreq(uint32_t hz)
 {
     int         found           = 0;
     int8_t      nearestIndex    = -1;
     uint32_t    nearestDistance = 0;
+    int8_t      i = 0;
 
-    for(int8_t i = 0; note_frequencies[i]; i++)
+    for(i = 0; note_frequencies[i]; i++)
     {
         uint32_t dist = (uint32_t)fabs((double)(hz - note_frequencies[i]));
 
@@ -420,15 +394,14 @@ int8_t nearestFreq(uint32_t hz)
     return nearestIndex;
 }
 
-int32_t relativeFreq(uint32_t hz, int32_t halfnotes)
+#ifdef BETA
+static int32_t relativeFreq(uint32_t hz, int32_t halfnotes)
 {
-    int8_t nearestIndex = nearestFreq(hz);
+    int32_t direction, i;
+    int8_t  nearestIndex = nearestFreq(hz);
 
-    if(nearestIndex < 0)
-        return -1;
-
-    int32_t direction = (halfnotes > 0) ? 1 : -1;
-    int32_t i = nearestIndex;
+    direction = (halfnotes > 0) ? 1 : -1;
+    i = nearestIndex;
 
     while((i >= 0) && (note_frequencies[i]) && (halfnotes != 0))
     {
@@ -441,14 +414,16 @@ int32_t relativeFreq(uint32_t hz, int32_t halfnotes)
 
     return -1;
 }
+#endif
 
-uint8_t hzToKey(uint32_t    hz,
+static uint8_t hzToKey(uint32_t    hz,
                 uint8_t     octave,
                 uint8_t     multL,
                 uint8_t     multH,
                 uint8_t     wsL,
                 uint8_t     wsH)
 {
+    int8_t nearestIndex;
     /*
      * Attempt to find best octave with using frequency multiplication values
      */
@@ -481,8 +456,8 @@ uint8_t hzToKey(uint32_t    hz,
     if(hz == 0)
         return 0;
 
-    int8_t nearestIndex = nearestFreq(hz);
-    return nearestIndex >= 0 ? (uint8_t)(octave + nearestIndex) : 0;
+    nearestIndex = nearestFreq(hz);
+    return (uint8_t)(octave + nearestIndex);
 }
 
 static uint8_t opl2_opChannel[] = {
@@ -514,13 +489,84 @@ static uint8_t opl2_op[] =
       0
 };
 
+
+
+static int instcmp(struct AdLibInstrument *inst1, struct AdLibInstrument* inst2)
+{
+    int cmp = 0;
+    cmp += (memcmp(inst1->reg20, inst2->reg20, 2) != 0);
+    cmp += ((inst1->reg40[0] & 0xC0) != (inst2->reg40[0] & 0xC0)); /* Don't compare carrier's volume level! */
+    cmp += (memcmp(&inst1->reg40[2], &inst1->reg40[2], 1) != 0);
+    cmp += (memcmp(inst1->reg60, inst2->reg60, 2) != 0);
+    cmp += (memcmp(inst1->reg80, inst2->reg80, 2) != 0);
+    cmp += (memcmp(&inst1->regC0, &inst2->regC0, 1) != 0);
+    cmp += (memcmp(inst1->regE0, inst2->regE0, 2) != 0);
+    return cmp;
+}
+
+static void printInst(struct AdLibInstrument *inst, uint8_t channel, int log)
+{
+    if(!log)
+        return;
+
+    printf("%d) "
+           "20:[%02X %02X]; "
+           "40:[%02X %02X]; "
+           "60:[%02X %02X]; "
+           "80:[%02X %02X]; "
+           "C0:[%02X]; "
+           "E0:[%02X %02X]\n"
+           ,
+            (int)channel,
+            inst->reg20[0], inst->reg20[1],
+           (inst->reg40[0] & 0xC0), inst->reg40[1],
+            inst->reg60[0], inst->reg60[1],
+            inst->reg60[0], inst->reg60[1],
+            inst->regC0,
+            inst->regE0[0], inst->regE0[1]
+           );
+}
+
+void Imf2MIDI_init(struct Imf2MIDI_CVT *cvt)
+{
+    size_t i = 0;
+
+    if(!cvt)
+        return;
+
+    memset(cvt->imf_instruments, 0, sizeof(cvt->imf_instruments));
+    memset(cvt->imf_instrumentsPrev, 0, sizeof(cvt->imf_instrumentsPrev));
+    memset(cvt->midi_mapchannel, 0, sizeof(cvt->midi_mapchannel));
+    memset(cvt->midi_lastpatch,  0, sizeof(cvt->midi_lastpatch));
+    memset(cvt->midi_lastpitch, 0, sizeof(cvt->midi_lastpitch));
+
+    cvt->midi_resolution    = 384;
+    cvt->midi_tempo         = 110.0;
+
+    for(i = 0; i < 9; i++)
+        cvt->midi_lastpitch[i] = MIDI_PITCH_CENTER;
+
+    cvt->midi_trackBegin    = 0;
+    cvt->midi_pos           = 0;
+    cvt->midi_fileSize      = 0;
+    cvt->midi_tracksNum     = 0;
+    cvt->midi_eventCode     = -1;
+    cvt->midi_isEndOfTrack  = 1;
+    cvt->midi_delta         = 0;
+    cvt->midi_time          = 0;
+
+    cvt->path_in    = NULL;
+    cvt->path_out   = NULL;
+}
+
 int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
 {
-    int     res = 0;
+    int     res = 1;
     char    *path_out = NULL;
     FILE    *file_in  = NULL;
     FILE    *file_out = NULL;
 
+    uint8_t  c;
     uint32_t imf_length = 0;
     uint32_t imf_delay  = 0;
     uint32_t imf_freq[9];
@@ -534,7 +580,7 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
     memset(imf_keys, 0, sizeof(imf_keys));
 
     if(!cvt)
-        return 0;
+        return res;
 
     /* Calculate target path */
     if(!cvt->path_out)
@@ -557,8 +603,7 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
 
     if(strcmp(cvt->path_in, cvt->path_out) == 0)
     {
-        fprintf(stderr, "\x1b[31mERROR:\x1b[0m File names are must not be same!");
-        res = 0;
+        fprintf(stderr, "\x1b[31mERROR:\x1b[0m File names are must not be same!\n\n");
         goto quit;
     }
 
@@ -574,22 +619,20 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
 
     if(!file_in)
     {
-        fprintf(stderr, "\x1b[31mERROR:\x1b[0m Can't open file %s for read!", cvt->path_in);
-        res = 0;
+        fprintf(stderr, "\x1b[31mERROR:\x1b[0m Can't open file %s for read!\n\n", cvt->path_in);
         goto quit;
     }
 
     if(!file_out)
     {
-        fprintf(stderr, "\x1b[31mERROR:\x1b[0m Can't open file %s for write!", cvt->path_out);
-        res = 0;
+        fprintf(stderr, "\x1b[31mERROR:\x1b[0m Can't open file %s for write!\n\n", cvt->path_out);
         goto quit;
     }
 
     imf_length = readLE32(file_in);
     if(imf_length == 0)
     {
-        fprintf(stderr, "\x1b[31mERROR:\x1b[0m Failed to read IMF length!");
+        fprintf(stderr, "\x1b[31mERROR:\x1b[0m Failed to read IMF length!\n\n");
         goto quit;
     }
 
@@ -598,7 +641,6 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
     MIDI_writeTempoEvent(file_out, cvt, (uint32_t)(60000000.0 / cvt->midi_tempo));
     MIDI_writeMetricKeyEvent(file_out, cvt, 4, 4, 24, 8);
 
-    uint8_t c;
     for(c = 0; c < 9; c++)
     {
         imf_freq[c] = 0;
@@ -608,7 +650,7 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
     for(c = 0; c <= 8; c++)
     {
         MIDI_writeControlEvent(file_out, cvt, c, MIDI_CONTROLLER_VOLUME, 127);
-        MIDI_writePatchChangeEvent(file_out, cvt, c, c);
+        //MIDI_writePatchChangeEvent(file_out, cvt, c, c);
         cvt->midi_lastpatch[c] = c;
     }
 
@@ -623,26 +665,27 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
         if((imf_regKey >= 0xA0) && (imf_regKey <= 0xA8))
         {
             imf_channel = imf_regKey - 0xa0;
-            imf_freq[imf_channel] = (imf_freq[imf_channel] & 0x0F00)|(imf_regVal & 0xFF);
+            imf_freq[imf_channel] = (imf_freq[imf_channel] & 0x0F00) | (imf_regVal & 0xFF);
             continue;
         }
 
         if((imf_regKey >= 0xB0) && (imf_regKey <= 0xB8))
         {
+            uint8_t isKeyOn = (imf_regVal >> 5) & 1;
+            uint8_t noteKey, multL, multH, wsL, wsH, velLevel;
+
             imf_channel = imf_regKey - 0xB0;
-            imf_freq[imf_channel] = (imf_freq[imf_channel] & 0x00FF)| (uint32_t)((imf_regVal & 0x03) << 0x08);
+            imf_freq[imf_channel] = (imf_freq[imf_channel] & 0x00FF)|(uint32_t)((imf_regVal & 0x03) << 0x08);
             imf_octave = (imf_regVal >> 0x02) & 0x07;
 
-            uint8_t isKeyOn = (imf_regVal >> 5) & 1;
+            multL = cvt->imf_instruments[imf_channel].reg20[0] & 0x0F;
+            multH = cvt->imf_instruments[imf_channel].reg20[1] & 0x0F;
+            wsL = cvt->imf_instruments[imf_channel].regE0[0] & 0x07;
+            wsH = cvt->imf_instruments[imf_channel].regE0[1] & 0x07;
 
-            uint8_t multL = cvt->imf_instruments[imf_channel].reg20[0] & 0x0F;
-            uint8_t multH = cvt->imf_instruments[imf_channel].reg20[1] & 0x0F;
-            uint8_t wsL = cvt->imf_instruments[imf_channel].regE0[0] & 0x07;
-            uint8_t wsH = cvt->imf_instruments[imf_channel].regE0[1] & 0x07;
-
-            uint8_t noteKey = hzToKey(imf_freq[imf_channel], imf_octave,
-                                  multL, multH,
-                                  wsL, wsH);
+            noteKey = hzToKey(imf_freq[imf_channel], imf_octave,
+                              multL, multH,
+                              wsL, wsH);
             /*
              * TODO: Add calculation of velocity for short notes which making expression
              * based on attack and sustain difference
@@ -650,7 +693,7 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
 
             if(noteKey > 0)
             {
-#if 0 /* WIP */
+#ifdef BETA /* WIP */
                 int32_t nextfreqIndex = nearestFreq(imf_freq[imf_channel]);
                 int32_t nextfreq = nextfreqIndex >= 0 ? note_frequencies[nextfreqIndex] : 0;
 
@@ -686,16 +729,25 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
 #endif
                 if(isKeyOn)
                 {
-                    uint8_t level = cvt->imf_instruments[imf_channel].reg40[0] & 0x3F;
+                    struct AdLibInstrument* inst1 = &cvt->imf_instruments[imf_channel];
+                    struct AdLibInstrument* inst2 = &cvt->imf_instrumentsPrev[imf_channel];
+                    if(instcmp(inst1 ,inst2) != 0 )
+                    {
+                        printInst(inst1, imf_channel, log);
+                        MIDI_writePatchChangeEvent(file_out, cvt, cvt->midi_mapchannel[imf_channel], rand() % 127);
+                        memcpy(inst2, inst1, sizeof(struct AdLibInstrument));
+                    }
 
-                    if(level > (cvt->imf_instruments[imf_channel].reg40[1] & 0x3F))
-                        level = cvt->imf_instruments[imf_channel].reg40[1] & 0x3F;
+                    velLevel = cvt->imf_instruments[imf_channel].reg40[0] & 0x3F;
+
+                    if(velLevel > (cvt->imf_instruments[imf_channel].reg40[1] & 0x3F))
+                        velLevel = cvt->imf_instruments[imf_channel].reg40[1] & 0x3F;
 
                     if(imf_keys[imf_channel] != 0)/* Mute note in channel if already pressed! */
                         MIDI_writeNoteOffEvent(file_out, cvt, cvt->midi_mapchannel[imf_channel], imf_keys[imf_channel], 0);
 
                     imf_keys[imf_channel] = noteKey;
-                    MIDI_writeNoteOnEvent(file_out, cvt, cvt->midi_mapchannel[imf_channel], noteKey, ((0x3f - level) << 1) & 0xFF);
+                    MIDI_writeNoteOnEvent(file_out, cvt, cvt->midi_mapchannel[imf_channel], noteKey, ((0x3f - velLevel) << 1) & 0xFF);
                 }
                 else
                 {
@@ -760,7 +812,7 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
                "=============================\n\n");
     }
 
-    res = 1;
+    res = 0;
 
 quit:
     if(file_in)

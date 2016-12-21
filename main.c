@@ -26,7 +26,12 @@
 #include <stdio.h>
 #include "imf2mid.h"
 
-int isFileExists(char* filePath)
+/**
+ * @brief Checks existing of the file
+ * @param filePath path to file to check for exists
+ * @return 1 if file exist, 0 if not exist
+ */
+static int isFileExists(char* filePath)
 {
     FILE* f = fopen(filePath, "rb");
     if(!f)
@@ -35,7 +40,11 @@ int isFileExists(char* filePath)
     return 1;
 }
 
-int printUsage()
+/**
+ * @brief Prints usage guide for this utility
+ * @return always 1
+ */
+static int printUsage()
 {
     printf("\x1b[32mIMF2MID\x1b[0m utility converts imf (Id-Software Music File) format into General Midi by Wohlstand\n\n");
     printf("  \x1b[31mUsage:\x1b[0m\n");
@@ -52,7 +61,7 @@ int main(int argc, char **argv)
 
     if(!isFileExists(argv[1]))
     {
-        fprintf(stderr, "\x1b[31mERROR:\x1b[0m Source file is invalid!");
+        fprintf(stderr, "\x1b[31mERROR:\x1b[0m Source file %s is invalid!\n\n", argv[1]);
         return printUsage();
     }
 
@@ -63,8 +72,8 @@ int main(int argc, char **argv)
     if(argc >= 2)
         cvt.path_out = argv[2];
 
-    Imf2MIDI_process(&cvt, 1);
-
-
-    return 0;
+    return Imf2MIDI_process(&cvt, 1);
 }
+
+
+
