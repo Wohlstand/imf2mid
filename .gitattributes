@@ -1,0 +1,6 @@
+*.pro linguist-vendored
+*.md linguist-vendored
+*.mk linguist-vendored
+*.imf linguist-vendored
+*.mid linguist-vendored
+
