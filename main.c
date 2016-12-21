@@ -24,7 +24,18 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 #include "imf2mid.h"
+#include <ctype.h>
+
+static int stricmp(char const *a, char const *b)
+{
+    for (;; a++, b++) {
+        int d = tolower(*a) - tolower(*b);
+        if ((d != 0) || (!*a))
+            return d;
+    }
+}
 
 /**
  * @brief Checks existing of the file
@@ -40,39 +51,84 @@ static int isFileExists(char* filePath)
     return 1;
 }
 
+#define VERSION_STRING "\x1b[32mIMF2MID version " IMF2MID_VERSION "\x1b[0m"
+
 /**
  * @brief Prints usage guide for this utility
  * @return always 1
  */
-static int printUsage()
+static int printUsage(void)
 {
-    printf("\x1b[32mIMF2MID\x1b[0m utility converts imf (Id-Software Music File) format into General Midi by Wohlstand\n\n");
+    printf("\n " VERSION_STRING "\n\n"
+           "An utility which converts IMF (Id-Software Music File) format into General MIDI.\n"
+           "Created by Wohlstand in 2016 year. Licensed under MIT license.\n\n"
+           "More detail information and source code here:\n"
+           "      https://github.com/Wohlstand/imf2mid\n\n");
     printf("  \x1b[31mUsage:\x1b[0m\n");
-    printf("     ./imf2mid \x1b[32mfilename.imf\x1b[0m \x1b[37m[filename.mid]\x1b[0m\n\n");
+    printf("     ./imf2mid \x1b[37m[option]\x1b[0m \x1b[32mfilename.imf\x1b[0m \x1b[37m[filename.mid]\x1b[0m\n\n");
+    printf(" -np   - ignore pitch change events\n");
+    printf(" -nl   - disable printing log\n");
+    printf("\n\n");
     return 1;
 }
 
 int main(int argc, char **argv)
 {
     struct Imf2MIDI_CVT cvt;
+    int logging = 1, noOptions = 0;
 
     if(argc <= 1)
         return printUsage();
 
-    if(!isFileExists(argv[1]))
-    {
-        fprintf(stderr, "\x1b[31mERROR:\x1b[0m Source file %s is invalid!\n\n", argv[1]);
-        return printUsage();
-    }
+    argv++;
+    argc--;
 
     Imf2MIDI_init(&cvt);
 
-    cvt.path_in = argv[1];
+    while(argc > 0)
+    {
+        if(!noOptions)
+        {
+            if(stricmp(*argv, "--version") == 0)
+            {
+                printf(VERSION_STRING "\n");
+                return 0;
+            }
+            else
+            if(stricmp(*argv, "-np") == 0)
+                cvt.flag_usePitch = 0;
+            else
+            if(stricmp(*argv, "-nl") == 0)
+                logging = 0;
+            else
+            {
+                noOptions = 1;
+                continue;
+            }
+        }
+        else
+        {
+            if(!cvt.path_in)
+            {
+                if(!isFileExists(*argv))
+                {
+                    fprintf(stderr, "\x1b[31mERROR:\x1b[0m Source file %s is invalid!\n\n", *argv);
+                    return printUsage();
+                }
+                cvt.path_in = *argv;
+            }
+            else
+            if(!cvt.path_out)
+            {
+                cvt.path_out = *argv;
+            }
+        }
 
-    if(argc >= 2)
-        cvt.path_out = argv[2];
+        argv++;
+        argc--;
+    }
 
-    return Imf2MIDI_process(&cvt, 1);
+    return Imf2MIDI_process(&cvt, logging);
 }
 
 

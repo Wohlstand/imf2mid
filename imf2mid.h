@@ -26,6 +26,8 @@
 #ifndef CONVERTER_H
 #define CONVERTER_H
 
+#define IMF2MID_VERSION     "0.9b"
+
 #ifndef __MSDOS__
 #include <stdint.h>
 #else
@@ -52,7 +54,8 @@ struct Imf2MIDI_CVT
 {
     struct AdLibInstrument imf_instruments[9];
     struct AdLibInstrument imf_instrumentsPrev[9];
-    //MIDI props
+
+    /* MIDI props */
     double   midi_tempo;
     uint32_t midi_resolution;
     uint8_t  midi_mapchannel[9];
@@ -67,13 +70,16 @@ struct Imf2MIDI_CVT
     uint32_t midi_delta;
     uint32_t midi_time;
 
-    //File paths
+    /* File paths */
     char    *path_in;
     char    *path_out;
+
+    /* Flags */
+    int      flag_usePitch;
 };
 
 extern void Imf2MIDI_init(struct Imf2MIDI_CVT *cvt);
 extern int  Imf2MIDI_process(struct Imf2MIDI_CVT *cvt, int log);
 
 
-#endif // CONVERTER_H
+#endif /* CONVERTER_H */
