@@ -69,7 +69,7 @@ static int printUsage(void)
     printf("     ./imf2mid \x1b[37m[option]\x1b[0m \x1b[32mfilename.imf\x1b[0m \x1b[37m[filename.mid]\x1b[0m\n\n");
     printf(" -np   - ignore pitch change events\n");
     printf(" -nl   - disable printing log\n");
-    printf(" -li   - stored detected instruments into \"instlog.txt\" file\n");
+    printf(" -li   - write dump of detected instruments into \"instlog.txt\" file\n");
     printf("\n\n");
 
     return 1;

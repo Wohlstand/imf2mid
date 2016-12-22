@@ -33,6 +33,7 @@ cl main.c imf2mid.c /link /out:imf2mid.exe
 ```
 * `-np` - ignore pitch change events
 * `-nl` - disable printing log
+* `-li` - write dump of detected instruments into "instlog.txt" file
 
 
 # License
