@@ -24,12 +24,14 @@
  */
 
 #include "imf2mid.h"
+#include "jwHash.h"
 #include <memory.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <malloc.h>
 #include <math.h>
+
 
 #define  MIDI_PITCH_CENTER      0x2000
 #define  MIDI_CONTROLLER_VOLUME 7
@@ -574,6 +576,7 @@ static uint8_t hzToKey(uint16_t hz,
 /*****************************************************************
  *                    Instrument management                      *
  *****************************************************************/
+
 static int instcmp(struct AdLibInstrument *inst1, struct AdLibInstrument* inst2)
 {
     int cmp = 0;
@@ -587,20 +590,99 @@ static int instcmp(struct AdLibInstrument *inst1, struct AdLibInstrument* inst2)
     return cmp;
 }
 
-static void printInst(struct AdLibInstrument *inst, uint8_t channel, int log)
+static int readInstLine(FILE* file, char* buffer)
 {
-    if(!log)
-        return;
+    int len = 0;
+    char* pos = buffer;
+    int c = 0, commentI = -1;
 
-    printf("%d) "
-           "20:[%02X %02X]; "
-           "40:[%02X %02X]; "
-           "60:[%02X %02X]; "
-           "80:[%02X %02X]; "
-           "C0:[%02X]; "
-           "E0:[%02X %02X]\n"
+    do
+    {
+        if(len >= 100)
+            break;
+
+        c = fgetc(file);
+
+        if(c >= 0)
+        {
+            (*pos++) = (char)c;
+            if(c == '/')
+                commentI = len;
+            len++;
+        }
+
+        if((c == EOF) && (len == 0))
+            return -1;
+    }
+    while( ((char)c != '\n') && (c != EOF));
+
+    buffer[len + 1] = '\0';
+
+    if(commentI >= 0) /* Cut comment text */
+        buffer[commentI] = '\0';
+
+    return len;
+}
+
+static jwHashTable* loadInstMap(void)
+{
+    char            instLineBuffer[101];
+    char            instBuff[27];
+    jwHashTable*    table = NULL;
+    int             countOfInsts = 0;
+    FILE*           instFile = NULL;
+
+    memset(instBuff, 0, 27);
+    memset(instLineBuffer, 0, 101);
+
+    instFile = fopen("regtable.txt", "r");
+    if(!instFile)
+        return NULL;
+
+    /* Count available instruments first */
+    while( readInstLine(instFile, instLineBuffer) != -1 )
+        countOfInsts++;
+
+    if(countOfInsts > 0)
+    {
+        int lineLen;
+        fseek(instFile, 0, SEEK_SET);
+        table = create_hash( (size_t)countOfInsts + 5 );
+        while(countOfInsts > 0)
+        {
+            lineLen = readInstLine(instFile, instLineBuffer);
+
+            if(lineLen < 0)
+                break;
+
+            if(lineLen >= 26)
+            {
+                int patchID = atoi(instLineBuffer + 23);
+                memset(instBuff, 0, 27);
+                memcpy(instBuff, instLineBuffer, 22);
+                add_int_by_str(table, instBuff, (long)patchID);
+            }
+            countOfInsts--;
+        }
+    }
+    fclose(instFile);
+
+    return table;
+}
+
+static uint8_t detectPatch(jwHashTable*table, struct AdLibInstrument *inst, int log)
+{
+    char instBuff[27];
+    int val = 0;
+
+    sprintf(instBuff,
+           "%02X%02X"
+           "%02X%02X"
+           "%02X%02X"
+           "%02X%02X"
+           "%02X"
+           "%02X%02X"
            ,
-            (int)channel,
             inst->reg20[0], inst->reg20[1],
            (inst->reg40[0] & 0xC0), inst->reg40[1],
             inst->reg60[0], inst->reg60[1],
@@ -608,6 +690,62 @@ static void printInst(struct AdLibInstrument *inst, uint8_t channel, int log)
             inst->regC0,
             inst->regE0[0], inst->regE0[1]
            );
+
+    if(get_int_by_str(table, instBuff, &val) == HASHOK)
+    {
+        if(log)
+            printf("Detected instrument %03d\n", val);
+        return (uint8_t)(val % 128);
+    } else {
+        val = rand() % 128;
+        if(log)
+            printf("INSTRUMENT NOT FOUND, USING RANDOM %03d\n", val);
+    }
+
+    return rand() % 128;
+}
+
+static void printInst(struct AdLibInstrument *inst, uint8_t channel, int log, FILE* inst_log)
+{
+    if(inst_log)
+    {
+        fprintf(inst_log,
+               "%02X%02X"
+               "%02X%02X"
+               "%02X%02X"
+               "%02X%02X"
+               "%02X"
+               "%02X%02X|%03d\n"
+               ,
+                inst->reg20[0], inst->reg20[1],
+               (inst->reg40[0] & 0xC0), inst->reg40[1],
+                inst->reg60[0], inst->reg60[1],
+                inst->reg60[0], inst->reg60[1],
+                inst->regC0,
+                inst->regE0[0], inst->regE0[1],
+                (int)channel
+               );
+    }
+
+    if(log)
+    {
+        printf("%d) "
+               "20:[%02X %02X]; "
+               "40:[%02X %02X]; "
+               "60:[%02X %02X]; "
+               "80:[%02X %02X]; "
+               "C0:[%02X]; "
+               "E0:[%02X %02X]\n"
+               ,
+                (int)channel,
+                inst->reg20[0], inst->reg20[1],
+               (inst->reg40[0] & 0xC0), inst->reg40[1],
+                inst->reg60[0], inst->reg60[1],
+                inst->reg60[0], inst->reg60[1],
+                inst->regC0,
+                inst->regE0[0], inst->regE0[1]
+               );
+    }
 }
 /*****************************************************************/
 
@@ -695,14 +833,18 @@ void Imf2MIDI_init(struct Imf2MIDI_CVT *cvt)
     cvt->path_out   = NULL;
 
     cvt->flag_usePitch = 1;
+    cvt->flag_logInstruments = 0;
 }
 
 int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
 {
-    int     res = 1;
+    int      res = 1;
     char    *path_out = NULL;
+
     FILE    *file_in  = NULL;
     FILE    *file_out = NULL;
+    const char* inst_log_name = "instlog.txt";
+    FILE    *inst_log = NULL;
 
     uint8_t  c;
     uint8_t  imf_buff[4];
@@ -716,6 +858,8 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
     uint8_t  imf_channel = 0;
     uint8_t  imf_regKey = 0;
     uint8_t  imf_regVal = 0;
+
+    jwHashTable *inst_table = NULL;
 
     memset(imf_keys, 0, sizeof(imf_keys));
     memset(imf_insChange, 0, sizeof(imf_insChange));
@@ -748,6 +892,8 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
         goto quit;
     }
 
+    inst_table = loadInstMap();
+
     if(log)
     {
         printf("=============================\n"
@@ -756,10 +902,15 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
 
         if(!cvt->flag_usePitch)
             printf("-- Pitch detection is disabled --\n");
+
+        if(inst_table)
+            printf("-- Found an instrument detection table! --\n");
     }
 
     file_in  = fopen(cvt->path_in, "rb");
     file_out = fopen(cvt->path_out, "wb");
+    if(cvt->flag_logInstruments)
+        inst_log = fopen(inst_log_name, "a");
 
     if(!file_in)
     {
@@ -850,8 +1001,13 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
                     struct AdLibInstrument* inst2 = &cvt->imf_instrumentsPrev[imf_channel];
                     if((imf_insChange[imf_channel]) && (instcmp(inst1 ,inst2) != 0) )
                     {
-                        printInst(inst1, imf_channel, log);
-                        MIDI_writePatchChangeEvent(file_out, cvt, cvt->midi_mapchannel[imf_channel], rand() % 127);
+                        uint8_t patch;
+                        printInst(inst1, imf_channel, log, inst_log);
+                        if(inst_table)
+                            patch = detectPatch(inst_table, inst1, log);
+                        else
+                            patch = rand() % 128;
+                        MIDI_writePatchChangeEvent(file_out, cvt, cvt->midi_mapchannel[imf_channel], patch);
                         memcpy(inst2, inst1, sizeof(struct AdLibInstrument));
                         imf_insChange[imf_channel] = 0;
                     }
@@ -937,6 +1093,13 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
         }
     }
 
+    /* Shut-up all stay-on notes */
+    for(c = 0; c <= 8; c++)
+    {
+        if(imf_keys[c] != 0)
+            MIDI_writeNoteOffEvent(file_out, cvt, cvt->midi_mapchannel[c], imf_keys[c], 0);
+    }
+
     MIDI_endTrack(file_out, cvt);
     MIDI_closeHead(file_out, cvt);
 
@@ -955,6 +1118,12 @@ quit:
 
     if(file_out)
         fclose(file_out);
+
+    if(inst_log)
+        fclose(inst_log);
+
+    if(inst_table)
+        delete_hash(inst_table);
 
     if(path_out)
     {

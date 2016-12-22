@@ -76,6 +76,7 @@ struct Imf2MIDI_CVT
 
     /* Flags */
     int      flag_usePitch;
+    int      flag_logInstruments;
 };
 
 extern void Imf2MIDI_init(struct Imf2MIDI_CVT *cvt);
