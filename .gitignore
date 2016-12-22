@@ -2,5 +2,16 @@
 /bin/imf2mid
 /bin/*.imf
 /bin/*.mid
+/bin/*.MID
+*.OBJ
+*.obj
+*.EXE
+*.exe
 build-*
+/watcom/*.map
+/watcom/*.sym
+/watcom/*.mk*
+/watcom/*.lk1
+/bc31/*.DSK
+/bc31/*.SYM
 
