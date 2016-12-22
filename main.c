@@ -28,7 +28,7 @@
 #include "imf2mid.h"
 #include <ctype.h>
 
-static int stricmp(char const *a, char const *b)
+static int mystricmp(char const *a, char const *b)
 {
     for (;; a++, b++) {
         int d = tolower(*a) - tolower(*b);
@@ -89,16 +89,16 @@ int main(int argc, char **argv)
     {
         if(!noOptions)
         {
-            if(stricmp(*argv, "--version") == 0)
+            if(mystricmp(*argv, "--version") == 0)
             {
                 printf(VERSION_STRING "\n");
                 return 0;
             }
             else
-            if(stricmp(*argv, "-np") == 0)
+            if(mystricmp(*argv, "-np") == 0)
                 cvt.flag_usePitch = 0;
             else
-            if(stricmp(*argv, "-nl") == 0)
+            if(mystricmp(*argv, "-nl") == 0)
                 logging = 0;
             else
             {
