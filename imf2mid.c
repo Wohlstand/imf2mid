@@ -778,7 +778,7 @@ static void makePitch(FILE* f, struct Imf2MIDI_CVT *cvt, int16_t freq, uint8_t c
             /* pitch relative */
             MIDI_writePitchEvent(f, cvt, cvt->midi_mapchannel[channel],
                                  (uint16_t)(MIDI_PITCH_CENTER
-                                            + (0x2000 * (((double)freq - (double)nextfreq) / ((double)freqR - (double)nextfreq))) )
+                                             + (0x2000 * (((double)freq - (double)nextfreq) / ((double)freqR - (double)nextfreq))) )
                                  );
         }
     }
@@ -968,6 +968,47 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
         {
             imf_channel = imf_regKey - 0xA0;
             imf_freq[imf_channel] = (imf_freq[imf_channel] & 0x0F00) | (imf_regVal & 0xFF);
+            #ifdef BETA
+            if(imf_keys[imf_channel])
+            {
+                if(cvt->flag_usePitch)
+                {
+                    /*
+                     * Apply pitch change on changing of the part of frequency.
+                     * However, results junk pitch changes (because parts of frequency bytes may
+                     * be changed independently, not both, and mid state is always wrong).
+                     */
+                    makePitch(file_out, cvt, (int16_t)imf_freq[imf_channel], imf_channel);
+                }
+                else
+                {   /*
+                        Attempt to detect note by frequency change only.
+                        In result some extra junk notes and a wrong octave
+                    */
+                    uint8_t noteKey = 0, multL, multH, wsL, wsH, velLevel;
+
+                    multL = cvt->imf_instruments[imf_channel].reg20[0] & 0x0F;
+                    multH = cvt->imf_instruments[imf_channel].reg20[1] & 0x0F;
+                    wsL = cvt->imf_instruments[imf_channel].regE0[0] & 0x07;
+                    wsH = cvt->imf_instruments[imf_channel].regE0[1] & 0x07;
+
+                    noteKey  = hzToKey(imf_freq[imf_channel], imf_octave,
+                                      multL, multH,
+                                      wsL, wsH);
+
+                    velLevel = cvt->imf_instruments[imf_channel].reg40[0] & 0x3F;
+
+                    if(velLevel > (cvt->imf_instruments[imf_channel].reg40[1] & 0x3F))
+                        velLevel = cvt->imf_instruments[imf_channel].reg40[1] & 0x3F;
+
+                    if(imf_keys[imf_channel] != 0)/* Mute note in channel if already pressed! */
+                        MIDI_writeNoteOffEvent(file_out, cvt, cvt->midi_mapchannel[imf_channel], imf_keys[imf_channel], 0);
+
+                    imf_keys[imf_channel] = noteKey;
+                    MIDI_writeNoteOnEvent(file_out, cvt, cvt->midi_mapchannel[imf_channel], noteKey, ((0x3f - velLevel) << 1) & 0xFF);
+                }
+            }
+            #endif
             continue;
         }
 
@@ -988,6 +1029,9 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
             noteKey = hzToKey(imf_freq[imf_channel], imf_octave,
                               multL, multH,
                               wsL, wsH);
+
+            if(cvt->flag_usePitch && noteKey && imf_keys[imf_channel])
+                makePitch(file_out, cvt, (int16_t)imf_freq[imf_channel], imf_channel);
             /*
              * TODO: Add calculation of velocity for short notes which making expression
              * based on attack and sustain difference
@@ -1012,7 +1056,7 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
                         imf_insChange[imf_channel] = 0;
                     }
 
-                    if(cvt->flag_usePitch)
+                    if(cvt->flag_usePitch && !imf_keys[imf_channel])
                         makePitch(file_out, cvt, (int16_t)imf_freq[imf_channel], imf_channel);
                 }
 
