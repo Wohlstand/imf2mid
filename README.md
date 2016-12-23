@@ -13,17 +13,17 @@ The format used in various Id-Software games like Commander Keen and Wolfenstein
 
 **GCC:**
 ```bash
-gcc main.c imf2mid.c -o imf2mid
+gcc main.c imf2mid.c jwHash.c -o imf2mid
 ```
 
 **CLang:**
 ```bash
-clang main.c imf2mid.c -o imf2mid
+clang main.c imf2mid.c jwHash.c -o imf2mid
 ```
 
 **MSVC:**
 ```cmd
-cl main.c imf2mid.c /link /out:imf2mid.exe
+cl main.c imf2mid.c jwHash.c /link /out:imf2mid.exe
 ```
 
 # Usage
