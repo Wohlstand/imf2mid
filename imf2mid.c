@@ -24,7 +24,6 @@
  */
 
 #include "imf2mid.h"
-#include "jwHash.h"
 #include <memory.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -569,6 +568,202 @@ static uint8_t hzToKey(uint16_t hz,
         return 0;
 
     return (uint8_t)(octave + nearestIndex);
+}
+/*****************************************************************/
+
+
+/*****************************************************************
+ *              Hash table by Jonathan Watmough
+ * Reduced version, added only used functions:
+ * (heler funcs, create hash, delete hash, add int by str, and get int by str)
+ * Full implementation of hash table for C can be retreived here:
+ * https://github.com/watmough/jwHash
+ *****************************************************************/
+
+/* resuts codes */
+typedef enum
+{
+    HASHOK,
+    HASHADDED,
+    HASHREPLACEDVALUE,
+    HASHALREADYADDED,
+    HASHDELETED,
+    HASHNOTFOUND
+} HASHRESULT;
+
+typedef enum
+{
+    HASHPTR,
+    HASHNUMERIC,
+    HASHSTRING
+} HASHVALTAG;
+
+typedef struct jwHashEntry jwHashEntry;
+struct jwHashEntry
+{
+    union
+    {
+        char  *strValue;
+        unsigned long intValue;
+    } key;
+    HASHVALTAG valtag;
+    union
+    {
+        long   intValue;
+    } value;
+    jwHashEntry *next;
+};
+
+typedef struct jwHashTable jwHashTable;
+struct jwHashTable
+{
+    /* pointer to array of buckets */
+    jwHashEntry **bucket;
+    unsigned long buckets;
+    /* if we resize, may need to hash multiple times */
+    unsigned long bucketsinitial;
+    HASHRESULT lastError;
+};
+
+/*================= STATIC HELPER FUNCTIONS=================*/
+
+/* http://www.cse.yorku.ca/~oz/hash.html *
+ * hash function for string keys djb2    */
+static unsigned long int hashString(char * str)
+{
+    unsigned long hash = 5381;
+    unsigned long c;
+
+    while( (c = (unsigned long)*str++) != 0 )
+        hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+
+    return hash;
+}
+
+/* helper for copying string keys and values */
+static char * copystring(char * value)
+{
+    char *copy = (char *)malloc(strlen(value) + 1);
+    if(!copy)
+    {
+        fprintf(stderr, "Unable to allocate string value %s\n", value);
+        abort();
+    }
+    strcpy(copy, value);
+    return copy;
+}
+
+/******** Create hash table ********/
+static jwHashTable *create_hash(size_t buckets)
+{
+    /* allocate space */
+    jwHashTable *table = (jwHashTable *)malloc(sizeof(jwHashTable));
+
+    if(!table)
+    {
+        /* unable to allocate */
+        return NULL;
+    }
+
+    /* setup */
+    table->bucket = (jwHashEntry **)malloc(buckets * sizeof(void*));
+    if( !table->bucket )
+    {
+        free(table);
+        return NULL;
+    }
+
+    memset(table->bucket, 0, buckets * sizeof(void*));
+    table->buckets = table->bucketsinitial = buckets;
+    return table;
+}
+
+/******** Delete hash table ********/
+static void *delete_hash(jwHashTable *table)
+{
+    size_t i =0 ;
+    for(; i < table->buckets; i++)
+    {
+        jwHashEntry *entry = table->bucket[i];
+        if(entry != 0)
+        {
+            /* delete string value if needed */
+            if(entry->key.strValue)
+                free(entry->key.strValue);
+            free(entry);
+        }
+    }
+
+    free(table->bucket);
+    free(table);
+    return NULL;
+}
+
+static HASHRESULT add_int_by_str( jwHashTable *table, char *key, long int value )
+{
+    jwHashEntry *entry;
+
+    /* compute hash on key */
+    unsigned long hash = hashString(key);
+    hash %= table->buckets;
+
+    /* check entry */
+    entry = table->bucket[hash];
+
+    /* already an entry */
+    while(entry != 0)
+    {
+        /* check for already indexed */
+        if(0 == strcmp(entry->key.strValue, key) && (value == entry->value.intValue))
+            return HASHALREADYADDED;
+
+        /* check for replacing entry */
+        if(0 == strcmp(entry->key.strValue, key) && (value != entry->value.intValue))
+        {
+            entry->value.intValue = (int)value;
+            return HASHREPLACEDVALUE;
+        }
+
+        /* move to next entry */
+        entry = entry->next;
+    }
+
+    /* create a new entry and add at head of bucket */
+    entry = (jwHashEntry *)malloc(sizeof(jwHashEntry));
+    entry->key.strValue = copystring(key);
+    entry->valtag = HASHNUMERIC;
+    entry->value.intValue = (int)value;
+    entry->next = table->bucket[hash];
+    table->bucket[hash] = entry;
+
+    return HASHOK;
+}
+
+/* Lookup int - keyed by str */
+static HASHRESULT get_int_by_str( jwHashTable *table, char *key, int *i )
+{
+    /* compute hash on key */
+    unsigned long hash = hashString(key) % table->buckets;
+
+    /* get entry */
+    jwHashEntry *entry = table->bucket[hash];
+
+    /* already an entry */
+    while(entry)
+    {
+        /* check for key */
+        if(0 == strcmp(entry->key.strValue, key))
+        {
+            *i = (int)entry->value.intValue;
+            return HASHOK;
+        }
+
+        /* move to next entry */
+        entry = entry->next;
+    }
+
+    /* not found */
+    return HASHNOTFOUND;
 }
 /*****************************************************************/
 

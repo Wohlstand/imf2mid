@@ -9,11 +9,9 @@ QMAKE_CFLAGS += -ansi
 
 SOURCES += \
     ../main.c \
-    ../imf2mid.c \
-    ../jwHash.c
+    ../imf2mid.c
 
 HEADERS += \
-    ../imf2mid.h \
-    ../jwHash.h
+    ../imf2mid.h
 
 

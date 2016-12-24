@@ -26,7 +26,7 @@
 #ifndef CONVERTER_H
 #define CONVERTER_H
 
-#define IMF2MID_VERSION     "0.9b"
+#define IMF2MID_VERSION     "0.9.1b"
 
 #if defined(MSDOS) || defined(__MSDOS__) || defined(_MSDOS) || defined(__DOS__)
 typedef unsigned char  uint8_t;

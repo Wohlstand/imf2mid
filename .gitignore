@@ -7,6 +7,10 @@
 *.obj
 *.EXE
 *.exe
+*.ERR
+*.err
+*.SMP
+*.smp
 build-*
 /watcom/*.map
 /watcom/*.sym
