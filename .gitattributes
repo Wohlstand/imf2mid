@@ -4,4 +4,5 @@
 *.MAK linguist-vendored
 *.imf linguist-vendored
 *.mid linguist-vendored
+*.bat linguist-vendored
 
