@@ -948,7 +948,7 @@ static void printInst(struct AdLibInstrument *inst, uint8_t channel, int log, FI
 /*****************************************************************
  *                      Helper functions                         *
  *****************************************************************/
-static void makePitch(FILE* f, struct Imf2MIDI_CVT *cvt, int16_t freq, uint8_t channel)
+static void makePitch(/*FILE* f*/uint16_t *pitchs, /*struct Imf2MIDI_CVT *cvt,*/ int16_t freq, uint8_t channel)
 {
     int16_t nextfreqIndex = nearestFreq((uint16_t)freq);
     int16_t nextfreq = (int16_t)note_frequencies[nextfreqIndex];
@@ -956,7 +956,8 @@ static void makePitch(FILE* f, struct Imf2MIDI_CVT *cvt, int16_t freq, uint8_t c
     if(nextfreq == freq)
     {
         /* Default state */
-        MIDI_writePitchEvent(f, cvt, cvt->midi_mapchannel[channel], MIDI_PITCH_CENTER);
+        /*MIDI_writePitchEvent(f, cvt, cvt->midi_mapchannel[channel], MIDI_PITCH_CENTER);*/
+        pitchs[channel] = MIDI_PITCH_CENTER;
         return;
     }
 
@@ -971,10 +972,8 @@ static void makePitch(FILE* f, struct Imf2MIDI_CVT *cvt, int16_t freq, uint8_t c
         if(freqR >= 0)
         {
             /* pitch relative */
-            MIDI_writePitchEvent(f, cvt, cvt->midi_mapchannel[channel],
-                                 (uint16_t)(MIDI_PITCH_CENTER
-                                             + (0x2000 * (((double)freq - (double)nextfreq) / ((double)freqR - (double)nextfreq))) )
-                                 );
+            pitchs[channel] = (uint16_t)(MIDI_PITCH_CENTER
+                            + (0x2000 * (((double)freq - (double)nextfreq) / ((double)freqR - (double)nextfreq))) );
         }
     }
     else
@@ -985,10 +984,8 @@ static void makePitch(FILE* f, struct Imf2MIDI_CVT *cvt, int16_t freq, uint8_t c
         if(freqR >= 0)
         {
             /* pitch relative */
-            MIDI_writePitchEvent(f, cvt, cvt->midi_mapchannel[channel],
-                                 (uint16_t)(MIDI_PITCH_CENTER
-                                             - (0x2000 * (((double)nextfreq - (double)freq) / ((double)nextfreq - (double)freqR))) )
-                                 );
+            pitchs[channel] = (uint16_t)(MIDI_PITCH_CENTER
+                                         - (0x2000 * (((double)nextfreq - (double)freq) / ((double)nextfreq - (double)freqR))) );
         }
     }
 }
@@ -1047,17 +1044,41 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
     uint32_t imf_length = 0;
     uint16_t imf_delay  = 0;
     uint16_t imf_freq[9];
+    uint8_t  imf_octs[9];
+    uint8_t  imf_key_st[9];
+    uint8_t  imf_key_st_prev[9];
+
     /* Array of pressed keys which allows to mute a pitched or toggled notes without powering off */
     uint8_t  imf_keys[9];
-    uint8_t  imf_octave  = 0;
+    uint8_t  imf_keys_prev[9];
+
+    uint16_t imf_pitchs[9] =
+    {
+        MIDI_PITCH_CENTER, MIDI_PITCH_CENTER, MIDI_PITCH_CENTER,
+        MIDI_PITCH_CENTER, MIDI_PITCH_CENTER, MIDI_PITCH_CENTER,
+        MIDI_PITCH_CENTER, MIDI_PITCH_CENTER, MIDI_PITCH_CENTER,
+    };
+    uint16_t imf_pitchs_prev[9] =
+    {
+        MIDI_PITCH_CENTER, MIDI_PITCH_CENTER, MIDI_PITCH_CENTER,
+        MIDI_PITCH_CENTER, MIDI_PITCH_CENTER, MIDI_PITCH_CENTER,
+        MIDI_PITCH_CENTER, MIDI_PITCH_CENTER, MIDI_PITCH_CENTER,
+    };
     uint8_t  imf_channel = 0;
     uint8_t  imf_regKey = 0;
     uint8_t  imf_regVal = 0;
 
     jwHashTable *inst_table = NULL;
 
-    memset(imf_keys, 0, sizeof(imf_keys));
+    memset(imf_buff, 0, sizeof(imf_buff));
     memset(imf_insChange, 0, sizeof(imf_insChange));
+    memset(imf_freq, 0, sizeof(imf_freq));
+    memset(imf_octs, 0, sizeof(imf_octs));
+
+    memset(imf_key_st, 0, sizeof(imf_key_st));
+    memset(imf_key_st_prev, 0, sizeof(imf_key_st_prev));
+    memset(imf_keys, 0, sizeof(imf_keys));
+    memset(imf_keys_prev, 0, sizeof(imf_keys_prev));
 
     if(!cvt)
         return res;
@@ -1136,6 +1157,7 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
     for(c = 0; c < 9; c++)
     {
         imf_freq[c] = 0;
+        imf_octs[c] = 0;
         cvt->midi_mapchannel[c] = c;
     }
 
@@ -1157,125 +1179,121 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
         imf_delay   = (imf_buff[0] & 0x00FF) | ((imf_buff[1]<<8) & 0xFF00);
         imf_regKey  =  imf_buff[2];
         imf_regVal  =  imf_buff[3];
-        MIDI_addDelta(cvt, imf_delay);
+
+        if((imf_delay > 0) || (imf_length == 0))
+        {
+            /*Store note events*/
+            for(c = 0; c <= 8; c++)
+            {
+                uint8_t noteKey = 0, multL, multH, wsL, wsH;
+
+                multL   = cvt->imf_instruments[c].reg20[0] & 0x0F;
+                multH   = cvt->imf_instruments[c].reg20[1] & 0x0F;
+                wsL     = cvt->imf_instruments[c].regE0[0] & 0x07;
+                wsH     = cvt->imf_instruments[c].regE0[1] & 0x07;
+
+                imf_keys[c] = hzToKey(imf_freq[c], imf_octs[c],
+                                  multL, multH,
+                                  wsL, wsH);
+
+                if(cvt->flag_usePitch && noteKey && imf_keys[imf_channel])
+                    makePitch(imf_pitchs, (int16_t)imf_freq[c], imf_channel);
+
+                if( (imf_key_st[c] != imf_key_st_prev[c]) ||
+                    (imf_keys[c] != imf_keys_prev[c]))
+                {
+                    if(imf_key_st[c])
+                    {
+                        struct AdLibInstrument* inst1 = &cvt->imf_instruments[c];
+                        struct AdLibInstrument* inst2 = &cvt->imf_instrumentsPrev[c];
+                        uint8_t velLevel = cvt->imf_instruments[c].reg40[0] & 0x3F;
+
+                        if((imf_insChange[c]) && (instcmp(inst1 ,inst2) != 0) )
+                        {
+                            uint8_t patch;
+                            printInst(inst1, imf_channel, log, inst_log);
+                            if(inst_table)
+                                patch = detectPatch(inst_table, inst1, log);
+                            else
+                                patch = rand() % 128;
+                            MIDI_writePatchChangeEvent(file_out, cvt, cvt->midi_mapchannel[imf_channel], patch);
+                            memcpy(inst2, inst1, sizeof(struct AdLibInstrument));
+                            imf_insChange[imf_channel] = 0;
+                        }
+
+                        if(velLevel > (cvt->imf_instruments[c].reg40[1] & 0x3F))
+                            velLevel = cvt->imf_instruments[c].reg40[1] & 0x3F;
+                        if(imf_keys_prev[c] != 0)/* Mute note in channel if already pressed! */
+                            MIDI_writeNoteOffEvent(file_out, cvt, cvt->midi_mapchannel[c], imf_keys_prev[c], 0);
+
+                        if((cvt->flag_usePitch) && (imf_pitchs[c] != imf_pitchs_prev[c]))
+                        {
+                            MIDI_writePitchEvent(file_out, cvt, cvt->midi_mapchannel[c], imf_pitchs[c]);
+                            imf_pitchs_prev[c] = imf_pitchs[c];
+                        }
+
+                        MIDI_writeNoteOnEvent(file_out, cvt, cvt->midi_mapchannel[c], imf_keys[c], ((0x3f - velLevel) << 1) & 0xFF);
+                    } else {
+                        if( imf_keys_prev[c] != 0)
+                            MIDI_writeNoteOffEvent(file_out, cvt, cvt->midi_mapchannel[c], imf_keys_prev[c], 0);
+                        imf_keys[c] = 0;
+                    }
+
+                    imf_key_st_prev[c] = imf_key_st[c];
+                    imf_keys_prev[c] = imf_keys[c];
+                }
+            }
+
+            /*Store pitch change events*/
+            for(c = 0; c <= 8; c++)
+            {
+                makePitch(imf_pitchs, (int16_t)imf_freq[c], imf_channel);
+                if((cvt->flag_usePitch) && (imf_pitchs[c] != imf_pitchs_prev[c]))
+                {
+                    MIDI_writePitchEvent(file_out, cvt, cvt->midi_mapchannel[c], imf_pitchs[c]);
+                    imf_pitchs_prev[c] = imf_pitchs[c];
+                }
+            }
+
+            /*Drop all captured events of this moment!*/
+            MIDI_addDelta(cvt, imf_delay);
+        }
 
         if((imf_regKey >= 0xA0) && (imf_regKey <= 0xA8))
         {
             imf_channel = imf_regKey - 0xA0;
             imf_freq[imf_channel] = (imf_freq[imf_channel] & 0x0F00) | (imf_regVal & 0xFF);
-            #ifdef BETA
-            if(imf_keys[imf_channel])
-            {
-                if(cvt->flag_usePitch)
-                {
-                    /*
-                     * Apply pitch change on changing of the part of frequency.
-                     * However, results junk pitch changes (because parts of frequency bytes may
-                     * be changed independently, not both, and mid state is always wrong).
-                     */
-                    makePitch(file_out, cvt, (int16_t)imf_freq[imf_channel], imf_channel);
-                }
-                else
-                {   /*
-                        Attempt to detect note by frequency change only.
-                        In result some extra junk notes and a wrong octave
-                    */
-                    uint8_t noteKey = 0, multL, multH, wsL, wsH, velLevel;
-
-                    multL = cvt->imf_instruments[imf_channel].reg20[0] & 0x0F;
-                    multH = cvt->imf_instruments[imf_channel].reg20[1] & 0x0F;
-                    wsL = cvt->imf_instruments[imf_channel].regE0[0] & 0x07;
-                    wsH = cvt->imf_instruments[imf_channel].regE0[1] & 0x07;
-
-                    noteKey  = hzToKey(imf_freq[imf_channel], imf_octave,
-                                      multL, multH,
-                                      wsL, wsH);
-
-                    velLevel = cvt->imf_instruments[imf_channel].reg40[0] & 0x3F;
-
-                    if(velLevel > (cvt->imf_instruments[imf_channel].reg40[1] & 0x3F))
-                        velLevel = cvt->imf_instruments[imf_channel].reg40[1] & 0x3F;
-
-                    if(imf_keys[imf_channel] != 0)/* Mute note in channel if already pressed! */
-                        MIDI_writeNoteOffEvent(file_out, cvt, cvt->midi_mapchannel[imf_channel], imf_keys[imf_channel], 0);
-
-                    imf_keys[imf_channel] = noteKey;
-                    MIDI_writeNoteOnEvent(file_out, cvt, cvt->midi_mapchannel[imf_channel], noteKey, ((0x3f - velLevel) << 1) & 0xFF);
-                }
-            }
-            #endif
             continue;
         }
 
         if((imf_regKey >= 0xB0) && (imf_regKey <= 0xB8))
         {
             uint8_t isKeyOn = (imf_regVal >> 5) & 1;
-            uint8_t noteKey = 0, multL, multH, wsL, wsH, velLevel;
+            uint8_t noteKey = 0, multL, multH, wsL, wsH /*, velLevel*/;
+
+            multL   = cvt->imf_instruments[c].reg20[0] & 0x0F;
+            multH   = cvt->imf_instruments[c].reg20[1] & 0x0F;
+            wsL     = cvt->imf_instruments[c].regE0[0] & 0x07;
+            wsH     = cvt->imf_instruments[c].regE0[1] & 0x07;
+
+            imf_keys[c] = hzToKey(imf_freq[c], imf_octs[c],
+                                  multL, multH,
+                                  wsL, wsH);
 
             imf_channel = imf_regKey - 0xB0;
             imf_freq[imf_channel] = (imf_freq[imf_channel] & 0x00FF) | (uint16_t)((imf_regVal & 0x03) << 0x08);
-            imf_octave = (imf_regVal >> 0x02) & 0x07;
+            imf_octs[imf_channel] = (imf_regVal >> 0x02) & 0x07;
 
-            multL = cvt->imf_instruments[imf_channel].reg20[0] & 0x0F;
-            multH = cvt->imf_instruments[imf_channel].reg20[1] & 0x0F;
-            wsL = cvt->imf_instruments[imf_channel].regE0[0] & 0x07;
-            wsH = cvt->imf_instruments[imf_channel].regE0[1] & 0x07;
-
-            noteKey = hzToKey(imf_freq[imf_channel], imf_octave,
-                              multL, multH,
-                              wsL, wsH);
-
-            if(cvt->flag_usePitch && noteKey && imf_keys[imf_channel])
-                makePitch(file_out, cvt, (int16_t)imf_freq[imf_channel], imf_channel);
+            imf_key_st[imf_channel] = isKeyOn;
+            if(noteKey > 0)
+            {
+                if(imf_key_st_prev[imf_channel] && !imf_key_st[imf_channel])
+                    imf_key_st_prev[imf_channel] = 0;
+            }
             /*
              * TODO: Add calculation of velocity for short notes which making expression
              * based on attack and sustain difference
              */
-
-            if(noteKey > 0)
-            {
-                if(isKeyOn)
-                {
-                    struct AdLibInstrument* inst1 = &cvt->imf_instruments[imf_channel];
-                    struct AdLibInstrument* inst2 = &cvt->imf_instrumentsPrev[imf_channel];
-                    if((imf_insChange[imf_channel]) && (instcmp(inst1 ,inst2) != 0) )
-                    {
-                        uint8_t patch;
-                        printInst(inst1, imf_channel, log, inst_log);
-                        if(inst_table)
-                            patch = detectPatch(inst_table, inst1, log);
-                        else
-                            patch = rand() % 128;
-                        MIDI_writePatchChangeEvent(file_out, cvt, cvt->midi_mapchannel[imf_channel], patch);
-                        memcpy(inst2, inst1, sizeof(struct AdLibInstrument));
-                        imf_insChange[imf_channel] = 0;
-                    }
-
-                    if(cvt->flag_usePitch && !imf_keys[imf_channel])
-                        makePitch(file_out, cvt, (int16_t)imf_freq[imf_channel], imf_channel);
-                }
-
-                if(isKeyOn)
-                {
-                    velLevel = cvt->imf_instruments[imf_channel].reg40[0] & 0x3F;
-
-                    if(velLevel > (cvt->imf_instruments[imf_channel].reg40[1] & 0x3F))
-                        velLevel = cvt->imf_instruments[imf_channel].reg40[1] & 0x3F;
-
-                    if(imf_keys[imf_channel] != 0)/* Mute note in channel if already pressed! */
-                        MIDI_writeNoteOffEvent(file_out, cvt, cvt->midi_mapchannel[imf_channel], imf_keys[imf_channel], 0);
-
-                    imf_keys[imf_channel] = noteKey;
-                    MIDI_writeNoteOnEvent(file_out, cvt, cvt->midi_mapchannel[imf_channel], noteKey, ((0x3f - velLevel) << 1) & 0xFF);
-                }
-                else
-                {
-                    if( imf_keys[imf_channel] != 0)
-                        MIDI_writeNoteOffEvent(file_out, cvt, cvt->midi_mapchannel[imf_channel], imf_keys[imf_channel], 0);
-                    imf_keys[imf_channel] = 0;
-                }
-            }
-
             continue;
         }
 
