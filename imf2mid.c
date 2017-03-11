@@ -1284,12 +1284,13 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
             imf_freq[imf_channel] = (imf_freq[imf_channel] & 0x00FF) | (uint16_t)((imf_regVal & 0x03) << 0x08);
             imf_octs[imf_channel] = (imf_regVal >> 0x02) & 0x07;
 
-            imf_key_st[imf_channel] = isKeyOn;
-            if(noteKey > 0)
+            if(isKeyOn)
             {
                 if(imf_key_st_prev[imf_channel] && !imf_key_st[imf_channel])
                     imf_key_st_prev[imf_channel] = 0;
             }
+            imf_key_st[imf_channel] = isKeyOn;
+
             /*
              * TODO: Add calculation of velocity for short notes which making expression
              * based on attack and sustain difference
