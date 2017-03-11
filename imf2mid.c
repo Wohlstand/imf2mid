@@ -1269,7 +1269,7 @@ int Imf2MIDI_process(struct Imf2MIDI_CVT* cvt, int log)
         if((imf_regKey >= 0xB0) && (imf_regKey <= 0xB8))
         {
             uint8_t isKeyOn = (imf_regVal >> 5) & 1;
-            uint8_t noteKey = 0, multL, multH, wsL, wsH /*, velLevel*/;
+            uint8_t /*noteKey = 0,*/ multL, multH, wsL, wsH /*, velLevel*/;
 
             multL   = cvt->imf_instruments[c].reg20[0] & 0x0F;
             multH   = cvt->imf_instruments[c].reg20[1] & 0x0F;
