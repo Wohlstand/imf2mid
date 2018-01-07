@@ -136,6 +136,3 @@ int main(int argc, char **argv)
 
     return Imf2MIDI_process(&cvt, logging);
 }
-
-
-
