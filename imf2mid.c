@@ -1,7 +1,7 @@
 /*
  * IMF2MIDI - a small utility to convert IMF music files into General MIDI
  *
- * Copyright (c) 2016 Vitaly Novichkov <admin@wohlnet.ru>
+ * Copyright (c) 2016-2018 Vitaly Novichkov <admin@wohlnet.ru>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal

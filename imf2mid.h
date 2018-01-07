@@ -1,7 +1,7 @@
 /*
  * IMF2MIDI - a small utility to convert IMF music files into General MIDI
  *
- * Copyright (c) 2016 Vitaly Novichkov <admin@wohlnet.ru>
+ * Copyright (c) 2016-2018 Vitaly Novichkov <admin@wohlnet.ru>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +26,7 @@
 #ifndef CONVERTER_H
 #define CONVERTER_H
 
-#define IMF2MID_VERSION     "0.9.4b"
+#define IMF2MID_VERSION     "0.9.4b (" __DATE__ ")"
 
 #if defined(MSDOS) || defined(__MSDOS__) || defined(_MSDOS) || defined(__DOS__)
 typedef unsigned char  uint8_t;
