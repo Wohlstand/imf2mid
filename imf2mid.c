@@ -40,36 +40,52 @@
  *                    Bufferized output                          *
  *****************************************************************/
 
+#define ENABLE_BUFFERIZED_WRITE
 #define BUF_MAX_SIZE  20480
 
+#ifdef ENABLE_BUFFERIZED_WRITE
 static char    BUF_output[BUF_MAX_SIZE];
 static size_t  BUF_stored   = 0;
 static size_t  BUF_lastPos  = 0;
+#endif
 
 static void fflushb(FILE* output)
 {
+    #ifdef ENABLE_BUFFERIZED_WRITE
     if(BUF_stored == 0)
         return;
     fwrite(BUF_output, 1, BUF_stored, output);
     BUF_lastPos += BUF_stored;
     BUF_stored = 0;
+    #else
+    fflush(output);
+    #endif
 }
 
 static void fseekb(FILE*f, long b)
 {
+    #ifdef ENABLE_BUFFERIZED_WRITE
     fflushb(f);
+    #endif
     fseek(f, b, SEEK_SET);
+    #ifdef ENABLE_BUFFERIZED_WRITE
     BUF_lastPos = (size_t)ftell(f);
+    #endif
 }
 
 static long ftellb(FILE* file)
 {
+    #ifdef ENABLE_BUFFERIZED_WRITE
     (void)file;
     return (long)(BUF_lastPos + BUF_stored);
+    #else
+    return ftell(file);
+    #endif
 }
 
 static size_t fwriteb(char* buf, size_t elements, size_t size, FILE* output)
 {
+    #ifdef ENABLE_BUFFERIZED_WRITE
     size_t newSize = elements * size;
     if(BUF_MAX_SIZE < (BUF_stored + newSize))
     {
@@ -81,6 +97,9 @@ static size_t fwriteb(char* buf, size_t elements, size_t size, FILE* output)
 
     BUF_stored += newSize;
     return size;
+    #else
+    return fwrite(buf, elements, size, output);
+    #endif
 }
 
 /*****************************************************************/
