@@ -412,7 +412,7 @@ static void MIDI_endTrack(FILE* f, struct Imf2MIDI_CVT *cvt)
     MIDI_writeMetaEvent(f, cvt, 0x2f, 0, 0);
     cvt->midi_isEndOfTrack = 1;
     fseekb(f, cvt->midi_trackBegin);
-    writeBE32( f, cvt->midi_fileSize - cvt->midi_trackBegin - 12);
+    writeBE32( f, cvt->midi_fileSize - cvt->midi_trackBegin - 4);
     fseekb(f, cvt->midi_fileSize);
     cvt->midi_trackBegin = 0;
 }
